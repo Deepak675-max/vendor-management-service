@@ -1,29 +1,9 @@
-const { vendorModel } = require('../../models/vendor.model');
 const httpErrors = require('http-errors');
-const JWT = require('jsonwebtoken');
-const redisClient = require('../../helper/common/init_redis');
 const notAuthorized = "Request not Authorized";
 const moment = require('moment');
+const axios = require('axios');
 
-const signAccessToken = (payloadData) => {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const jwtAccessToken = JWT.sign(
-                {
-                    vendorId: payloadData.vendorId,
-                    email: payloadData.email
-                },
-                process.env.JWT_TOKEN_SECRET_KEY
-            );
-            await redisClient.SET(`${payloadData.vendorId}`, jwtAccessToken, {
-                EX: parseInt(moment.duration(moment().endOf("day")).asSeconds()),
-            })
-            resolve(jwtAccessToken);
-        } catch (error) {
-            reject(error);
-        }
-    })
-}
+
 
 const verifyAccessToken = async (req, res, next) => {
     try {
@@ -40,46 +20,44 @@ const verifyAccessToken = async (req, res, next) => {
             throw httpErrors[401]('Invalid jwtAccessToken format.');
         }
 
-        const payloadData = JWT.verify(accessToken, process.env.JWT_TOKEN_SECRET_KEY);
-
-        const cachedAccessToken = await redisClient.GET(`${payloadData.vendorId}`);
-
-        if (accessToken !== cachedAccessToken) {
-            throw notAuthorized;
+        const requestBody = {
+            accessToken: accessToken
         }
-        const vendorDetails = await vendorModel.findOne({
-            _id: payloadData.vendorId
-        })
 
-        req.vendor = vendorDetails;
+        const response = await axios.post('http://localhost:5000/v1/auth/authorize-vendor', requestBody);
 
-        next();
+        if (response.status === 200) {
+            req.vendor = response.data.data.vendor;
+            next();
+        }
+        else {
+            throw response.data.error.message;
+        }
 
     } catch (error) {
+        console.log("Error = ", error);
         next(httpErrors.Unauthorized(notAuthorized));
     }
 }
 
-const removeToken = (payloadData) => {
-    return new Promise(async (resolve, reject) => {
-        try {
-            await redisClient
-                .DEL(payloadData.vendorId.toString())
-                .catch((error) => {
-                    reject(httpErrors.InternalServerError(error));
-                })
-                .then(() => {
-                    resolve();
-                });
-        } catch (error) {
-            reject(error);
-        }
-    })
+// const removeToken = (payloadData) => {
+//     return new Promise(async (resolve, reject) => {
+//         try {
+//             await redisClient
+//                 .DEL(payloadData.vendorId.toString())
+//                 .catch((error) => {
+//                     reject(httpErrors.InternalServerError(error));
+//                 })
+//                 .then(() => {
+//                     resolve();
+//                 });
+//         } catch (error) {
+//             reject(error);
+//         }
+//     })
 
-}
+// }
 
 module.exports = {
     verifyAccessToken,
-    removeToken,
-    signAccessToken
 }
